@@ -69,6 +69,7 @@ internal static class Program
         const string executable = "BadWindowsService.exe";
         const string fullPath = $@"{childDirectory}\{executable}";
         const string svcName = "BadWindowsService";
+        const string temp = @"C:\Temp";
 
         // Create folder structure and grant Everyone full control
         if (CreateDirectWithFullControl(parentDirectory))
@@ -123,7 +124,7 @@ internal static class Program
         
         try
         {
-            RunCommandWriteOutput(installUtilPath, fullPath);
+            RunCommandWriteOutput(installUtilPath, $"\"{fullPath}\"");
             Console.WriteLine("[+] Service installed");
         }
         catch (Exception ex)
@@ -175,6 +176,10 @@ internal static class Program
             Console.Error.WriteLine("[!] Service registry permissions modification failed: {0}", ex.Message);
             return;
         }
+        
+        // create C:\TEMP
+        if (!Directory.Exists(temp)) 
+            Directory.CreateDirectory(temp);
 
         // Start the service
         var service = new ServiceController(svcName);
