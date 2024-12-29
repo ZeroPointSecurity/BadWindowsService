@@ -1,80 +1,73 @@
 ﻿using System;
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.ServiceProcess;
 using System.Threading;
 
+namespace BadWindowsService;
 
-namespace BadWindowsService
+public partial class BadWindowsService : ServiceBase
 {
-    public partial class BadWindowsService : ServiceBase
+    [DllImport("kernel32", SetLastError = true, CharSet = CharSet.Ansi)]
+    private static extern IntPtr LoadLibraryA(string lpFileName);
+    
+    [DllImport("kernel32", SetLastError = true, CharSet = CharSet.Ansi)]
+    private static extern IntPtr GetModuleHandleA(string lpModuleName);
+
+    private CancellationTokenSource _cts;
+
+    public BadWindowsService()
     {
-        [DllImport("kernel32", SetLastError = true)]
-        static extern IntPtr LoadLibrary([MarshalAs(UnmanagedType.LPStr)] string lpFileName);
+        InitializeComponent();
+    }
 
-        public static Thread thread1;
-        public static Thread thread2;
-        public static string newPath;
+    protected override void OnStart(string[] args)
+    {
+        // add C:\Windows\Temp to the start of the PATH environment variable
+        var currentPath = Environment.GetEnvironmentVariable("PATH");
+        var newPath = $@"C:\Windows\Temp\;{currentPath}";
+        Environment.SetEnvironmentVariable("PATH", newPath);
+        
+        // set working directory to C:\Temp
+        Directory.SetCurrentDirectory(@"C:\Temp");
 
-        public BadWindowsService()
+        _cts = new CancellationTokenSource();
+        
+        // run the loop
+        var t = new Thread(DoBadThings);
+        t.Start();
+    }
+
+    protected override void OnStop()
+    {
+        _cts.Cancel();
+    }
+
+    private void DoBadThings()
+    {
+        const string moduleName = "BadDll.dll";
+        
+        while (!_cts.IsCancellationRequested)
         {
-            InitializeComponent();
-        }
-
-        protected override void OnStart(string[] args)
-        {
-            string value = Environment.GetEnvironmentVariable("PATH");
-            newPath = @"C:\Temp\;" + value;
-
-            thread1 = new Thread(Restart);
-            thread1.Start();
-
-            thread2 = new Thread(DoBadThings);
-            thread2.Start();
-        }
-
-        private static void Restart()
-        {
-            Thread.Sleep(60000);
-            ServiceController service = new ServiceController("BadWindowsService");
-            service.Stop();
-            Thread.Sleep(5000);
-            service.Start();
-            thread2.Abort();
-            thread1.Abort();
-        }
-
-        protected override void OnStop()
-        {
-        }
-
-        private static void DoBadThings()
-        {
-            while (true)
+            try
             {
-                // Add C:\Temp to the top of the PATH environment variable
-                var value = Environment.GetEnvironmentVariable("PATH");
-                Environment.SetEnvironmentVariable("PATH", newPath);
-
-                // Set the current directory
-                Directory.SetCurrentDirectory(AppDomain.CurrentDomain.BaseDirectory); // @"C:\Bad Windows Service\Service Executable\");
-
-                // Load DLL
-                try
-                {
-                    IntPtr handle = LoadLibrary("BadDll.dll");
-                }
-                catch { };
-
-                // Run executable
-                try
-                {
-                    System.Diagnostics.Process.Start("cmd.exe", "/c exit");
-                }
-                catch { };
-
-                Thread.Sleep(10000);
+                // load module
+                if (GetModuleHandleA(moduleName) == IntPtr.Zero)
+                    _ = LoadLibraryA(moduleName);
             }
+            catch { };
+
+            try
+            {
+                // run executable
+                Process.Start("cmd.exe", "/c exit");
+            }
+            catch { };
+
+            Thread.Sleep(new TimeSpan(0, 1, 0));
         }
+        
+        _cts.Dispose();
     }
 }
