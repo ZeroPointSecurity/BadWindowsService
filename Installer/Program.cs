@@ -36,23 +36,19 @@ internal static class Program
         process.WaitForExit();
     }
 
-    private static bool CreateDirectWithFullControl(string path)
+    private static void CreateDirectoryWithFullControl(string path)
     {
-        var directoryRule = new FileSystemAccessRule(
-            "Everyone", 
+        var rule = new FileSystemAccessRule(
+            new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null), 
             FileSystemRights.FullControl, 
             InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
             PropagationFlags.None, 
             AccessControlType.Allow);
         
-        var directorySecurity = new DirectorySecurity();
-        directorySecurity.AddAccessRule(directoryRule);
+        var security = new DirectorySecurity();
+        security.AddAccessRule(rule);
 
-        if (Directory.Exists(path))
-            return false;
-
-        Directory.CreateDirectory(path, directorySecurity);
-        return true;
+        Directory.CreateDirectory(path, security);
     }
 
     public static void Main(string[] args)
@@ -67,53 +63,56 @@ internal static class Program
         const string parentDirectory = @"C:\Program Files\Bad Windows Service";
         const string childDirectory = $@"{parentDirectory}\Service Executable";
         const string executable = "BadWindowsService.exe";
-        const string fullPath = $@"{childDirectory}\{executable}";
+        const string dll = "BadDll.dll";
+        const string exePath = $@"{childDirectory}\{executable}";
+        const string dllPath = $@"{parentDirectory}\{dll}";
         const string svcName = "BadWindowsService";
         const string temp = @"C:\Temp";
 
-        // Create folder structure and grant Everyone full control
-        if (CreateDirectWithFullControl(parentDirectory))
-        {
-            Console.WriteLine("[+] Created folder {0}", parentDirectory);
-        }
-        else
-        {
-            Console.WriteLine("[*] Folder {0} already exists", parentDirectory);
-        }
+        // create parent directory
+        Directory.CreateDirectory(parentDirectory);
+        Console.WriteLine("[+] Created folder {0}", parentDirectory);
         
-        if (CreateDirectWithFullControl(childDirectory))
-        {
-            Console.WriteLine("[+] Created folder {0}", childDirectory);
-        }
-        else
-        {
-            Console.WriteLine("[*] Folder {0} already exists", childDirectory);
-        }
+        // create service directory with full control
+        CreateDirectoryWithFullControl(childDirectory);
+        Console.WriteLine("[+] Created folder {0}", childDirectory);
 
-        // Copy executable to destination
+        // copy executable to destination
         if (File.Exists(executable))
         {
-            Console.WriteLine("[+] Located {0} in current working directory",executable);
-            File.Copy(executable, fullPath, true);
-            Console.WriteLine(@"[+] Copied {0} to {1}", executable, fullPath);
+            File.Copy(executable, exePath, true);
+            Console.WriteLine("[+] Copied {0} to {1}", executable, exePath);
 
-            // Grant Everyone full control
-            var fileRule = new FileSystemAccessRule(
-                "Everyone",
+            // grant full control
+            var rule = new FileSystemAccessRule(
+                new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null),
                 FileSystemRights.FullControl, 
                 AccessControlType.Allow);
             
-            var fileSecurity = new FileSecurity();
-            fileSecurity.AddAccessRule(fileRule);
-            File.SetAccessControl(fullPath, fileSecurity);
-            Console.WriteLine("[+] Granted Everyone full control");
+            var security = new FileSecurity();
+            security.AddAccessRule(rule);
+            File.SetAccessControl(exePath, security);
+            Console.WriteLine("[+] Granted AuthenticatedUserSid Full Control");
         }
         else
         {
             Console.Error.WriteLine("[X] Service executable not found in current working directory");
+            return;
+        }
+        
+        // copy DLL to destination
+        if (File.Exists(dll))
+        {
+            File.Copy(dll, dllPath, true);
+            Console.WriteLine("[+] Copied {0} to {1}", dll, dllPath);
+        }
+        else
+        {
+            Console.Error.WriteLine("[X] Dll not found in current working directory");
+            return;
         }
 
-        //Run installer
+        // Run installer
         var installUtilPath = RuntimeEnvironment.GetRuntimeDirectory() + "InstallUtil.exe";
         
         if (!File.Exists(installUtilPath))
@@ -124,7 +123,7 @@ internal static class Program
         
         try
         {
-            RunCommandWriteOutput(installUtilPath, $"\"{fullPath}\"");
+            RunCommandWriteOutput(installUtilPath, $"\"{exePath}\"");
             Console.WriteLine("[+] Service installed");
         }
         catch (Exception ex)
@@ -133,10 +132,10 @@ internal static class Program
             return;
         }
 
-        // Modify service binpath to be an unquoted path
         try
         {
-            RunCommandWriteOutput("sc.exe", $"config {svcName} binpath= \"{fullPath}\"");
+            // modify service binpath to be an unquoted path
+            RunCommandWriteOutput("sc.exe", $"config {svcName} binpath= \"{exePath}\"");
             Console.WriteLine("[+] Service binpath is now unquoted");
         }
         catch (Exception ex)
@@ -145,11 +144,11 @@ internal static class Program
             return;
         }
 
-        // Modify service permissions - grant Everyone full control
         try
         {
-            RunCommandWriteOutput("sc.exe", $"sdset {svcName} \"D:PAI(A;;FA;;;WD)\"");
-            Console.WriteLine("[+] Granted Everyone full control on the service");
+            // modify service permissions
+            RunCommandWriteOutput("sc.exe", $"sdset {svcName} \"D:PAI(A;;FA;;;AU)\"");
+            Console.WriteLine("[+] Granted AuthenticatedUserSid control on the service");
         }
         catch (Exception ex)
         {
@@ -157,19 +156,22 @@ internal static class Program
             return;
         }
 
-        // Grant Everyone full control over the service's Registry key
         try
         {
+            // grant full control over the service's registry key
             var rs = new RegistrySecurity();
+            
             rs.AddAccessRule(new RegistryAccessRule(
-                "Everyone",
+                new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null),
                 RegistryRights.FullControl,
                 InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
                 PropagationFlags.None,
                 AccessControlType.Allow));
+            
             var rk = Registry.LocalMachine.OpenSubKey($@"SYSTEM\CurrentControlSet\Services\{svcName}", true);
             rk.SetAccessControl(rs);
-            Console.WriteLine("[+] Granted Everyone full control on the service's Registry key");
+            
+            Console.WriteLine("[+] Granted AuthenticatedUserSid Full Control on the service's Registry key");
         }
         catch (Exception ex)
         {
@@ -180,15 +182,24 @@ internal static class Program
         // create C:\TEMP
         if (!Directory.Exists(temp)) 
             Directory.CreateDirectory(temp);
+        
+        // add directory to path variable
+        var path = Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.Machine);
+        Environment.SetEnvironmentVariable("PATH", $"{path};{parentDirectory}", EnvironmentVariableTarget.Machine);
+        Console.WriteLine($"[+] Added {parentDirectory} to machine PATH variable");
 
-        // Start the service
+        // start the service
         var service = new ServiceController(svcName);
         service.Start();
         Thread.Sleep(3000);
-        
+
         if (service.Status == ServiceControllerStatus.Running)
-            Console.WriteLine("[+] Service started!"); 
+        {
+            Console.WriteLine("[+] Service started!");
+        }
         else
-            Console.Error.WriteLine("[X] Service failed to start"); 
+        {
+            Console.Error.WriteLine("[X] Service failed to start");
+        } 
     }
 }

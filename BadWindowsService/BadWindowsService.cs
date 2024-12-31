@@ -9,11 +9,14 @@ namespace BadWindowsService;
 
 public partial class BadWindowsService : ServiceBase
 {
-    [DllImport("kernel32", SetLastError = true, CharSet = CharSet.Ansi)]
+    [DllImport("kernel32", CharSet = CharSet.Ansi)]
     private static extern IntPtr LoadLibraryA(string lpFileName);
+
+    [DllImport("kernel32", CharSet = CharSet.Ansi)]
+    private static extern IntPtr GetProcAddress(IntPtr hModule, string lpProcName);
     
-    [DllImport("kernel32", SetLastError = true, CharSet = CharSet.Ansi)]
-    private static extern IntPtr GetModuleHandleA(string lpModuleName);
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate bool BadFunc();
 
     private CancellationTokenSource _cts;
 
@@ -46,15 +49,29 @@ public partial class BadWindowsService : ServiceBase
 
     private void DoBadThings()
     {
-        const string moduleName = "BadDll.dll";
-        
         while (!_cts.IsCancellationRequested)
         {
             try
             {
+                const string moduleName = "BadDll.dll";
+                const string funcName = "BadFunc";
+                
                 // load module
-                if (GetModuleHandleA(moduleName) == IntPtr.Zero)
-                    _ = LoadLibraryA(moduleName);
+                var hModule = LoadLibraryA(moduleName);
+                if (hModule == IntPtr.Zero)
+                    throw new DllNotFoundException($"{moduleName} not found.");
+                
+                // get func address
+                var hFunc = GetProcAddress(hModule, funcName);
+                if (hFunc == IntPtr.Zero)
+                    throw new ApplicationException($"{funcName} not found.");
+                
+                // marshal function pointer
+                var badFunc = Marshal.GetDelegateForFunctionPointer<BadFunc>(hFunc);
+                
+                // execute it
+                if (badFunc() == false)
+                    throw new ApplicationException("Result from BadFunc was false.");
             }
             catch { };
 
@@ -65,7 +82,7 @@ public partial class BadWindowsService : ServiceBase
             }
             catch { };
 
-            Thread.Sleep(new TimeSpan(0, 1, 0));
+            Thread.Sleep(new TimeSpan(0, 0, 30));
         }
         
         _cts.Dispose();

@@ -1,0 +1,3 @@
+LIBRARY		BAD
+EXPORTS
+   BadFunc	@1
