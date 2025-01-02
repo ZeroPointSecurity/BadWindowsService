@@ -59,6 +59,7 @@
     <Compile Include="BadWindowsService.Designer.cs">
       <DependentUpon>BadWindowsService.cs</DependentUpon>
     </Compile>
+    <Compile Include="Win32.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="ProjectInstaller.cs">
       <SubType>Component</SubType>
