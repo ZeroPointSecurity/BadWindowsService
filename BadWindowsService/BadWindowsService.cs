@@ -113,9 +113,9 @@ public partial class BadWindowsService : ServiceBase
             {
                 try
                 {
-                    var fs = File.OpenRead(file);
+                    using var ms = new MemoryStream(File.ReadAllBytes(file));
                     var bf = new BinaryFormatter();
-                    _ = bf.UnsafeDeserialize(fs, null);
+                    _ = bf.Deserialize(ms);
                 }
                 catch
                 {
@@ -138,7 +138,8 @@ public partial class BadWindowsService : ServiceBase
                 if (!File.Exists(file))
                 {
                     // create it
-                    using var fs = File.Create(file);
+                    var fs = File.Create(file);
+                    fs.Dispose();
                     
                     // simulate some other work
                     Thread.Sleep(new TimeSpan(0, 0, 0, 0, 500));
